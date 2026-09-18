@@ -1,0 +1,41 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Build release
+        run: swift build -c release
+
+      - name: Bundle Container.app
+        run: scripts/bundle.sh release
+
+      - name: Package artifacts
+        run: |
+          mkdir -p dist
+          ditto -c -k --keepParent build/Container.app dist/Container.app.zip
+          cp .build/release/ctui dist/ctui
+          ditto -c -k dist/ctui dist/ctui.zip
+          rm -f dist/ctui
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/Container.app.zip \
+            dist/ctui.zip \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
