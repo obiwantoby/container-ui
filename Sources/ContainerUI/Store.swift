@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import IOKit.ps
 import ContainerKit
 
 /// The app's single source of truth. Polls the CLI on a timer and exposes
@@ -20,8 +21,22 @@ final class Store: ObservableObject {
     private var runHelp = ""
 
     private var pollTask: Task<Void, Never>?
-    private let interval: Duration = .seconds(2)
     private var tick = 0
+
+    /// Adaptive poll cadence: idle when nothing runs, gentler on battery, snappy
+    /// when active and plugged in. Halves idle wakeups without any felt lag.
+    private var currentInterval: Duration {
+        if runningCount == 0 { return .seconds(5) }
+        return onBattery ? .seconds(3) : .seconds(2)
+    }
+
+    /// True when the Mac is running on battery (IOKit power source).
+    private var onBattery: Bool {
+        guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let type = IOPSGetProvidingPowerSourceType(blob)?.takeRetainedValue() as String?
+        else { return false }
+        return type == kIOPSBatteryPowerValue
+    }
     private let imageEveryNTicks = 5          // refetch images ~every 10s, not 2s
     var active = true                         // paused when the app is inactive
 
@@ -45,7 +60,7 @@ final class Store: ObservableObject {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 if self?.active == true { await self?.refresh() }
-                try? await Task.sleep(for: self?.interval ?? .seconds(2))
+                try? await Task.sleep(for: self?.currentInterval ?? .seconds(2))
             }
         }
     }
