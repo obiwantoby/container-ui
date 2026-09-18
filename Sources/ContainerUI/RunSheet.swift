@@ -8,6 +8,11 @@ struct RunSheet: View {
     @EnvironmentObject var store: Store
     @Environment(\.dismiss) private var dismiss
 
+    /// When set, the sheet edits (recreates) this container instead of running
+    /// a fresh one: fields are prefilled and Run replaces the container.
+    var editing: ContainerInfo? = nil
+
+    @State private var didPrefill = false
     @State private var image = "ubuntu"
     @State private var name = ""
     @State private var command = ""
@@ -24,10 +29,20 @@ struct RunSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Label("Run a container", systemImage: "plus.app").font(.headline)
+                Label(editing == nil ? "Run a container" : "Edit “\(editing!.id)” (recreate)",
+                      systemImage: editing == nil ? "plus.app" : "pencil")
+                    .font(.headline)
                 Spacer()
             }.padding()
             Divider()
+
+            if editing != nil {
+                Label("Changes are applied by replacing the container. It restarts briefly.",
+                      systemImage: "info.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal).padding(.top, 6)
+            }
 
             if store.aiAvailable { assistant }
 
@@ -60,6 +75,18 @@ struct RunSheet: View {
             footer
         }
         .frame(width: 520, height: 720)
+        .onAppear(perform: prefill)
+    }
+
+    /// Seed the form from the container being edited (once).
+    private func prefill() {
+        guard let c = editing, !didPrefill else { return }
+        didPrefill = true
+        image = c.image
+        name = c.id
+        memory = ""   // keep default unless the user sets it; shown as placeholder
+        cpus = "\(c.cpus)"
+        detach = true
     }
 
     // MARK: Assistant (natural language → fills the fields)
@@ -132,7 +159,7 @@ struct RunSheet: View {
                     .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Run") { launch() }
+                Button(editing == nil ? "Run" : "Apply & recreate") { launch() }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.glassProminent)
                     .disabled(!spec.isValid)
@@ -165,7 +192,8 @@ struct RunSheet: View {
 
     private func launch() {
         guard spec.isValid else { return }
-        store.run(spec)
+        if let old = editing { store.recreate(oldID: old.id, spec: spec) }
+        else { store.run(spec) }
         dismiss()
     }
 }

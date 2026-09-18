@@ -5,6 +5,7 @@ import ContainerKit
 struct ContainersView: View {
     @EnvironmentObject var store: Store
     @State private var showingRun = false
+    @State private var editingContainer: ContainerInfo?
     @State private var logsFor: ContainerInfo?
     @State private var query = ""
     @State private var showInspector = true
@@ -17,6 +18,9 @@ struct ContainersView: View {
                 || $0.image.localizedCaseInsensitiveContains(query)
             }
     }
+
+    /// Stable per-refresh key: identity + state only.
+    var rowSignature: [String] { filtered.map { "\($0.id):\($0.runState.rawValue)" } }
 
     var body: some View {
         Group {
@@ -43,7 +47,9 @@ struct ContainersView: View {
                         }
                     }
                     .padding(12)
-                    .animation(.spring(response: 0.42, dampingFraction: 0.82), value: filtered)
+                    // Animate only on real add/remove/state changes, not on every
+                    // 2s poll (which replaces the array with equal-looking values).
+                    .animation(.spring(response: 0.42, dampingFraction: 0.82), value: rowSignature)
                 }
             }
         }
@@ -64,7 +70,8 @@ struct ContainersView: View {
         }
         .inspector(isPresented: $showInspector) {
             if let c = store.selectedContainer {
-                ContainerDetail(container: c, onLogs: { logsFor = c })
+                ContainerDetail(container: c, onLogs: { logsFor = c },
+                                onEdit: { editingContainer = c })
                     .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
             } else {
                 ContentUnavailableView("No selection", systemImage: "hand.point.up.left",
@@ -72,6 +79,7 @@ struct ContainersView: View {
             }
         }
         .sheet(isPresented: $showingRun) { RunSheet() }
+        .sheet(item: $editingContainer) { RunSheet(editing: $0) }
         .sheet(item: $logsFor) { LogsView(container: $0) }
     }
 }
@@ -177,6 +185,7 @@ struct ContainerDetail: View {
     @EnvironmentObject var store: Store
     let container: ContainerInfo
     let onLogs: () -> Void
+    let onEdit: () -> Void
     @State private var execCommand = ""
     @State private var execOutput = ""
     @State private var aiOutput = ""
@@ -249,6 +258,9 @@ struct ContainerDetail: View {
             }
             Button { onLogs() } label: { Label("Logs", systemImage: "text.alignleft") }
                 .buttonStyle(.glass)
+            Button { onEdit() } label: { Label("Edit", systemImage: "pencil") }
+                .buttonStyle(.glass)
+                .help("Recreate this container with new mounts, ports, or resources")
         }
         .controlSize(.small)
     }

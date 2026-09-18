@@ -48,11 +48,12 @@ struct StatusPill: View {
 struct AuroraBackground: View {
     var tint: Color = .accentColor
     var body: some View {
-        TimelineView(.animation) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
             let t = context.date.timeIntervalSinceReferenceDate
-            let a = Float(sin(t * 0.5)) * 0.06
-            let b = Float(cos(t * 0.4)) * 0.06
-            let c = Float(sin(t * 0.6 + 1)) * 0.06
+            // Slow, small drift so it breathes rather than lurches.
+            let a = Float(sin(t * 0.18)) * 0.035
+            let b = Float(cos(t * 0.14)) * 0.035
+            let c = Float(sin(t * 0.22 + 1)) * 0.035
             MeshGradient(
                 width: 3, height: 3,
                 points: [

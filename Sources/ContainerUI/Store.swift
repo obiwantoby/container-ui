@@ -103,6 +103,16 @@ final class Store: ObservableObject {
     /// Run raw `container run <args>` (used by the AI-suggested command).
     func runRaw(flags: [String]) { perform("Run") { try await self.cli.runChecked(["run"] + flags) } }
 
+    /// Apply config changes (e.g. new mounts) to an existing container by
+    /// replacing it: a container's mounts/resources are fixed at creation, so
+    /// we remove the old one and run a new one with the updated spec.
+    func recreate(oldID: String, spec: RunSpec) {
+        perform("Recreate") {
+            try await self.cli.remove(oldID, force: true)
+            _ = try await self.cli.runContainer(spec)
+        }
+    }
+
     /// Run a one-shot command in a container; returns output via completion.
     func exec(_ id: String, command: String, then completion: @escaping (String) -> Void) {
         Task {
