@@ -17,6 +17,7 @@ final class Store: ObservableObject {
     let ai = Assistant()
     var binaryPath: String { cli.binaryPath }
     @Published var aiAvailable = false
+    private var runHelp = ""
 
     private var pollTask: Task<Void, Never>?
     private let interval: Duration = .seconds(2)
@@ -36,7 +37,10 @@ final class Store: ObservableObject {
     // MARK: Lifecycle of the poller
 
     func start() {
-        Task { aiAvailable = await ai.isAvailable() }
+        Task {
+            aiAvailable = await ai.isAvailable()
+            runHelp = await cli.help(["run"])
+        }
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -127,8 +131,9 @@ final class Store: ObservableObject {
         }
     }
 
-    func suggestRun(_ request: String, then completion: @escaping (String) -> Void) {
-        Task { completion(await ai.suggestRunFlags(request)) }
+    /// Natural language → a structured, grounded draft the Run form fills in.
+    func suggestRunDraft(_ request: String, then completion: @escaping (Assistant.RunSpecDraft?) -> Void) {
+        Task { completion(await ai.suggestRunDraft(request, help: runHelp)) }
     }
 
     func diagnose(_ id: String, then completion: @escaping (String) -> Void) {

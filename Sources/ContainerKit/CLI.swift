@@ -39,6 +39,37 @@ public struct RunSpec: Sendable {
         self.ports = ports; self.env = env; self.detach = detach
     }
 
+    /// Value-level validation so a command is known-good before save/run.
+    /// Flag *syntax* is guaranteed because `arguments` assembles it; this
+    /// checks the values the user (or the assistant) supplied.
+    public var validationIssues: [String] {
+        var issues: [String] = []
+        if image.trimmingCharacters(in: .whitespaces).isEmpty {
+            issues.append("Image is required.")
+        }
+        if !memory.isEmpty, memory.range(of: #"^\d+(\.\d+)?\s*[KMGTPkmgtp]?[Bb]?$"#, options: .regularExpression) == nil {
+            issues.append("Memory “\(memory)” isn't valid (try 512M or 2G).")
+        }
+        if !cpus.isEmpty, Int(cpus) == nil || (Int(cpus) ?? 0) <= 0 {
+            issues.append("CPUs “\(cpus)” must be a positive whole number.")
+        }
+        for p in ports where !p.isEmpty {
+            let parts = p.split(separator: "/").first.map(String.init) ?? p
+            let hc = parts.split(separator: ":")
+            let valid = hc.count == 2 && Int(hc[0]) != nil && Int(hc[1]) != nil
+            if !valid { issues.append("Port “\(p)” must be host:container (e.g. 8080:80).") }
+        }
+        for v in volumes where !v.isEmpty && !v.contains(":") {
+            issues.append("Mount “\(v)” must be host:container.")
+        }
+        for e in env where !e.isEmpty && !e.contains("=") {
+            issues.append("Env “\(e)” must be KEY=VALUE.")
+        }
+        return issues
+    }
+
+    public var isValid: Bool { validationIssues.isEmpty }
+
     public var arguments: [String] {
         var a = ["run"]
         if detach { a.append("-d") }
@@ -109,6 +140,13 @@ public actor ContainerCLI {
     public func listImages() async throws -> [ImageInfo] {
         let out = try await runChecked(["image", "ls", "--format", "json"])
         return try decode([ImageInfo].self, from: out)
+    }
+
+    /// Raw `--help` text for a subcommand (e.g. ["run"]). Used to ground the
+    /// assistant in the binary's actual flags, so it stays correct as the CLI
+    /// evolves.
+    public func help(_ subcommand: [String]) async -> String {
+        (try? await run(subcommand + ["--help"]))?.stdout ?? ""
     }
 
     public func systemStatus() async -> Bool {

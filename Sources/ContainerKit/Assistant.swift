@@ -45,15 +45,60 @@ public actor Assistant {
             instructions: "You are a concise assistant that explains Linux containers running on macOS via Apple's `container` tool.")
     }
 
-    /// Turn a natural-language request into `container run` flags.
-    public func suggestRunFlags(_ request: String) async -> String {
-        await respond(
-            "Request: \(request)\n\nReturn ONLY the arguments that follow `container run` "
-            + "(no code fences, no explanation). Example: -d --name web -p 8080:80 -m 512M nginx:latest",
-            instructions: "You translate requests into Apple `container` CLI run flags. "
-            + "Valid flags: -d, --name, -m (memory like 512M/2G), -c (cpus), -v host:container, "
-            + "-p host:container, -e KEY=VALUE, followed by the image and optional command. "
-            + "Output a single line of flags only.")
+    /// A structured draft of a container to run. FM fills this against a JSON
+    /// schema; the app assembles the actual flags, so the syntax can't be wrong.
+    public struct RunSpecDraft: Codable, Sendable {
+        public var image: String?
+        public var name: String?
+        public var memory: String?
+        public var cpus: String?
+        public var detach: Bool?
+        public var ports: [String]?
+        public var volumes: [String]?
+        public var env: [String]?
+        public var command: String?
+    }
+
+    /// JSON schema (fm-native) describing RunSpecDraft.
+    private static let runSpecSchema = """
+    {"type":"object","required":["image"],"additionalProperties":false,"title":"RunSpec",
+     "properties":{
+      "image":{"type":"string","description":"container image like nginx:latest"},
+      "name":{"type":"string"},
+      "memory":{"type":"string","description":"memory like 512M or 2G"},
+      "cpus":{"type":"string","description":"number of cpus"},
+      "detach":{"type":"boolean"},
+      "ports":{"type":"array","items":{"type":"string"},"description":"host:container"},
+      "volumes":{"type":"array","items":{"type":"string"},"description":"hostPath:containerPath"},
+      "env":{"type":"array","items":{"type":"string"},"description":"KEY=VALUE"},
+      "command":{"type":"string"}}}
+    """
+
+    /// Turn a natural-language request into a structured, validated draft,
+    /// grounded in the binary's own `run --help` so it uses real options.
+    public func suggestRunDraft(_ request: String, help: String) async -> RunSpecDraft? {
+        // fm needs the schema as a file path.
+        let dir = FileManager.default.temporaryDirectory
+        let file = dir.appendingPathComponent("container-ui-runspec-\(UUID().uuidString).json")
+        guard (try? Self.runSpecSchema.write(to: file, atomically: true, encoding: .utf8)) != nil
+        else { return nil }
+        defer { try? FileManager.default.removeItem(at: file) }
+
+        let grounding = """
+        You configure a container to run with Apple's `container` tool. Map the user's request
+        to the fields. Only use values the request implies. Memory uses suffixes K/M/G/T/P.
+        Ports and volumes are "host:container". Env is "KEY=VALUE". Prefer detach=true for services.
+        The binary's own reference for `container run` follows; respect it:
+        \(String(help.prefix(3000)))
+        """
+        guard let r = try? await run(["respond", "--no-stream", "--schema", file.path,
+                                      "-i", grounding, request]),
+              r.ok else { return nil }
+        let json = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Model may wrap JSON in prose; grab the outermost object.
+        guard let start = json.firstIndex(of: "{"), let end = json.lastIndex(of: "}") else { return nil }
+        let obj = String(json[start...end])
+        return try? JSONDecoder().decode(RunSpecDraft.self, from: Data(obj.utf8))
     }
 
     /// Summarize/diagnose a slice of container logs.

@@ -2,6 +2,8 @@ import SwiftUI
 import ContainerKit
 
 /// A form to launch a new container — the GUI equivalent of `container run`.
+/// The assistant fills the fields; the app assembles the flags; a validator
+/// gates the Run button. Bad syntax can't reach the binary.
 struct RunSheet: View {
     @EnvironmentObject var store: Store
     @Environment(\.dismiss) private var dismiss
@@ -11,18 +13,18 @@ struct RunSheet: View {
     @State private var command = ""
     @State private var memory = ""
     @State private var cpus = ""
+    @State private var detach = true
     @State private var volumesText = ""     // one "host:container[:ro]" per line
     @State private var portsText = ""       // one "host:container" per line
     @State private var envText = ""         // one "KEY=VALUE" per line
     @State private var aiPrompt = ""
-    @State private var aiFlags = ""
     @State private var aiBusy = false
+    @State private var aiNote = ""
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Label("Run a container", systemImage: "plus.app")
-                    .font(.headline)
+                Label("Run a container", systemImage: "plus.app").font(.headline)
                 Spacer()
             }.padding()
             Divider()
@@ -38,6 +40,7 @@ struct RunSheet: View {
                 Section("Resources") {
                     TextField("Memory", text: $memory, prompt: Text("default — e.g. 2G"))
                     TextField("CPUs", text: $cpus, prompt: Text("default — e.g. 2"))
+                    Toggle("Detach (run in background)", isOn: $detach)
                 }
                 Section("Mounts (one per line: host:container[:ro])") {
                     TextEditor(text: $volumesText).frame(height: 54)
@@ -54,66 +57,91 @@ struct RunSheet: View {
             }
             .formStyle(.grouped)
 
-            Divider()
-            HStack {
-                Text(previewCommand)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2).truncationMode(.middle)
-                    .textSelection(.enabled)
-                Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Run") { launch() }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(image.trimmingCharacters(in: .whitespaces).isEmpty)
-            }.padding()
+            footer
         }
-        .frame(width: 520, height: 640)
+        .frame(width: 520, height: 720)
     }
 
-    /// Natural-language → `container run` flags, on-device.
+    // MARK: Assistant (natural language → fills the fields)
+
     private var assistant: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles").foregroundStyle(.tint)
                     .symbolEffect(.pulse, isActive: aiBusy)
                 TextField("Describe it, e.g. “nginx on port 8080 with 512MB”", text: $aiPrompt)
                     .textFieldStyle(.plain)
                     .onSubmit(suggest)
-                Button("Suggest", action: suggest)
+                Button("Fill", action: suggest)
                     .buttonStyle(.glass).controlSize(.small)
                     .disabled(aiPrompt.isEmpty || aiBusy)
             }
-            if !aiFlags.isEmpty {
-                HStack {
-                    Text("container run \(aiFlags)")
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled).lineLimit(2)
-                    Spacer()
-                    Button("Run it") {
-                        store.runRaw(flags: aiFlags.split(separator: " ").map(String.init))
-                        dismiss()
-                    }.buttonStyle(.glassProminent).controlSize(.small)
-                }
-                .padding(8)
-                .glassEffect(.regular, in: .rect(cornerRadius: 8))
-                .transition(.opacity)
+            if !aiNote.isEmpty {
+                Text(aiNote).font(.caption).foregroundStyle(.secondary).transition(.opacity)
             }
         }
         .padding(12)
-        .animation(.smooth, value: aiFlags)
+        .animation(.smooth, value: aiNote)
     }
 
     private func suggest() {
         guard !aiPrompt.isEmpty else { return }
-        aiBusy = true; aiFlags = ""
-        store.suggestRun(aiPrompt) { flags in
-            // Keep a single clean line of flags.
-            aiFlags = flags.split(whereSeparator: \.isNewline).first.map(String.init) ?? flags
+        aiBusy = true; aiNote = "Thinking…"
+        store.suggestRunDraft(aiPrompt) { draft in
             aiBusy = false
+            guard let d = draft else { aiNote = "Couldn't build a suggestion. Try rephrasing."; return }
+            apply(d)
+            aiNote = spec.isValid ? "Filled in — review and Run."
+                                  : "Filled in — a couple values need a look."
         }
     }
+
+    /// Overlay the model's draft onto the form (only where it proposed a value).
+    private func apply(_ d: Assistant.RunSpecDraft) {
+        if let v = d.image, !v.isEmpty { image = v }
+        if let v = d.name { name = v }
+        if let v = d.memory { memory = v }
+        if let v = d.cpus { cpus = v }
+        if let v = d.detach { detach = v }
+        if let v = d.command { command = v }
+        if let v = d.ports { portsText = v.joined(separator: "\n") }
+        if let v = d.volumes { volumesText = v.joined(separator: "\n") }
+        if let v = d.env { envText = v.joined(separator: "\n") }
+    }
+
+    // MARK: Footer with validation gate
+
+    private var footer: some View {
+        VStack(spacing: 8) {
+            Divider()
+            if !spec.validationIssues.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(spec.validationIssues, id: \.self) { issue in
+                        Label(issue, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+                .transition(.opacity)
+            }
+            HStack {
+                Text(previewCommand)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(spec.isValid ? Color.secondary : Color.orange)
+                    .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Run") { launch() }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.glassProminent)
+                    .disabled(!spec.isValid)
+            }.padding([.horizontal, .bottom])
+        }
+        .animation(.smooth, value: spec.validationIssues)
+    }
+
+    // MARK: Spec + helpers
 
     private var spec: RunSpec {
         RunSpec(
@@ -125,12 +153,10 @@ struct RunSheet: View {
             volumes: lines(volumesText),
             ports: lines(portsText),
             env: lines(envText),
-            detach: true)
+            detach: detach)
     }
 
-    private var previewCommand: String {
-        "container " + spec.arguments.joined(separator: " ")
-    }
+    private var previewCommand: String { "container " + spec.arguments.joined(separator: " ") }
 
     private func lines(_ s: String) -> [String] {
         s.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
@@ -138,6 +164,7 @@ struct RunSheet: View {
     }
 
     private func launch() {
+        guard spec.isValid else { return }
         store.run(spec)
         dismiss()
     }
