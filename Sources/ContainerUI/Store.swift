@@ -14,10 +14,15 @@ final class Store: ObservableObject {
     @Published var selection: String?          // selected container id
 
     let cli = ContainerCLI()
+    let ai = Assistant()
     var binaryPath: String { cli.binaryPath }
+    @Published var aiAvailable = false
 
     private var pollTask: Task<Void, Never>?
     private let interval: Duration = .seconds(2)
+    private var tick = 0
+    private let imageEveryNTicks = 5          // refetch images ~every 10s, not 2s
+    var active = true                         // paused when the app is inactive
 
     // MARK: Derived
 
@@ -31,10 +36,11 @@ final class Store: ObservableObject {
     // MARK: Lifecycle of the poller
 
     func start() {
+        Task { aiAvailable = await ai.isAvailable() }
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.refresh()
+                if self?.active == true { await self?.refresh() }
                 try? await Task.sleep(for: self?.interval ?? .seconds(2))
             }
         }
@@ -44,7 +50,15 @@ final class Store: ObservableObject {
 
     // MARK: Data
 
+    /// Full refresh (used by manual refresh and the poll loop). Images are only
+    /// refetched every few ticks since they change rarely.
     func refresh() async {
+        let includeImages = (tick % imageEveryNTicks == 0)
+        tick &+= 1
+        await refresh(includeImages: includeImages)
+    }
+
+    func refresh(includeImages: Bool) async {
         let running = await cli.systemStatus()
         self.systemRunning = running
         guard running else {
@@ -52,11 +66,10 @@ final class Store: ObservableObject {
             return
         }
         do {
-            async let c = cli.listContainers(all: true)
-            async let i = cli.listImages()
-            let (cs, imgs) = try await (c, i)
-            self.containers = cs.sorted { $0.id < $1.id }
-            self.images = imgs.sorted { $0.name < $1.name }
+            self.containers = try await cli.listContainers(all: true).sorted { $0.id < $1.id }
+            if includeImages {
+                self.images = try await cli.listImages().sorted { $0.name < $1.name }
+            }
         } catch {
             self.lastError = error.localizedDescription
         }
@@ -83,6 +96,9 @@ final class Store: ObservableObject {
     }
     func run(_ spec: RunSpec) { perform("Run") { _ = try await self.cli.runContainer(spec) } }
 
+    /// Run raw `container run <args>` (used by the AI-suggested command).
+    func runRaw(flags: [String]) { perform("Run") { try await self.cli.runChecked(["run"] + flags) } }
+
     /// Run a one-shot command in a container; returns output via completion.
     func exec(_ id: String, command: String, then completion: @escaping (String) -> Void) {
         Task {
@@ -100,6 +116,29 @@ final class Store: ObservableObject {
         p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         p.arguments = ["-e", script]
         try? p.run()
+    }
+
+    // MARK: On-device assistant (Apple Foundation Models)
+
+    func explain(_ c: ContainerInfo, then completion: @escaping (String) -> Void) {
+        Task {
+            let json = (try? JSONEncoder().encode(c)).flatMap { String(data: $0, encoding: .utf8) } ?? c.id
+            completion(await ai.explain(containerJSON: json))
+        }
+    }
+
+    func suggestRun(_ request: String, then completion: @escaping (String) -> Void) {
+        Task { completion(await ai.suggestRunFlags(request)) }
+    }
+
+    func diagnose(_ id: String, then completion: @escaping (String) -> Void) {
+        Task {
+            let (stream, cancel) = await cli.logStream(id, follow: false, tail: 300)
+            var buf = ""
+            for await line in stream { buf += line + "\n" }
+            cancel()
+            completion(await ai.diagnose(logs: buf))
+        }
     }
 
     func dismissError() { lastError = nil }

@@ -234,12 +234,13 @@ public actor ContainerCLI {
     }
 
     private static func configure(_ p: Process, path: String, args: [String]) {
-        if path == "container" {
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            p.arguments = ["container"] + args
-        } else {
+        if path.contains("/") {
             p.executableURL = URL(fileURLWithPath: path)
             p.arguments = args
+        } else {
+            // Bare name (e.g. "container"/"fm"): resolve via PATH.
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            p.arguments = [path] + args
         }
     }
 }

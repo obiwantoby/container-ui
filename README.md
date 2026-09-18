@@ -19,8 +19,9 @@ work. These front-ends read it and draw it.
 
 ## What it does
 
-- Shows your containers. It refreshes every two seconds. You see the state, the
-  image, the CPU, the memory, the address.
+- Shows your containers. It refreshes every two seconds while you watch, and
+  stops when you look away. You see the state, the image, the CPU, the memory,
+  the address.
 - Starts and stops them. Removes them. Starts and stops the engine.
 - Follows the logs. The lines come in as they happen. You can select them.
 - Runs a new container. You pick the image, the name, the memory, the CPUs, the
@@ -29,13 +30,29 @@ work. These front-ends read it and draw it.
 - Sits in the menu bar. It shows how many run. You start and stop from there.
 - Runs in the terminal too. That is `ctui`. It is fast. You drive it with keys.
 
+It looks the way a Mac app should. The surfaces are Liquid Glass. The rows blend
+and morph. A mesh gradient breathes behind the details, drawn on the GPU. It
+turns green when the engine runs.
+
+## The assistant
+
+If you have Apple's on-device model — the `fm` CLI — the app uses it. It is
+private. It runs on the Mac. Nothing leaves.
+
+- Describe a container in plain words. It writes the `run` command.
+- Ask what a container is. It tells you.
+- Point it at the logs. It says what went wrong.
+
+No key. No account. If `fm` is not there, the assistant hides itself.
+
 ## What you need
 
-- An Apple silicon Mac. macOS 14 or newer.
-- The Swift 6 toolchain. Xcode 16 or newer.
+- An Apple silicon Mac. macOS 26 or newer. The glass wants it.
+- The Swift 6 toolchain. Xcode 26 or newer.
 - A working [`container`](https://github.com/apple/container). The app looks for
   the binary in this order: `$CONTAINER_BIN`, `~/container/bin/container`,
   `/usr/local/bin/container`, `/opt/homebrew/bin/container`, then your `PATH`.
+- The `fm` CLI, if you want the assistant. It is optional.
 
 ## Build it. Run it.
 

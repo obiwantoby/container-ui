@@ -8,6 +8,7 @@ struct ContainersView: View {
     @State private var logsFor: ContainerInfo?
     @State private var query = ""
     @State private var showInspector = true
+    @Namespace private var glassNS
 
     var filtered: [ContainerInfo] {
         query.isEmpty ? store.containers
@@ -27,15 +28,22 @@ struct ContainersView: View {
                     description: Text("Launch one with the + button."))
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 6) {
-                        ForEach(filtered) { c in
-                            ContainerRow(container: c,
-                                         selected: store.selection == c.id,
-                                         onSelect: { store.selection = c.id },
-                                         onLogs: { logsFor = c })
+                    GlassEffectContainer(spacing: 8) {
+                        LazyVStack(spacing: 8) {
+                            ForEach(filtered) { c in
+                                ContainerRow(container: c,
+                                             selected: store.selection == c.id,
+                                             namespace: glassNS,
+                                             onSelect: { store.selection = c.id },
+                                             onLogs: { logsFor = c })
+                                .transition(.asymmetric(
+                                    insertion: .opacity.combined(with: .scale(scale: 0.94)),
+                                    removal: .opacity.combined(with: .scale(scale: 0.98))))
+                            }
                         }
                     }
                     .padding(12)
+                    .animation(.spring(response: 0.42, dampingFraction: 0.82), value: filtered)
                 }
             }
         }
@@ -43,7 +51,7 @@ struct ContainersView: View {
         .searchable(text: $query, prompt: "Filter by name or image")
         .toolbar {
             ToolbarItemGroup {
-                Button { Task { await store.refresh() } } label: {
+                Button { Task { await store.refresh(includeImages: true) } } label: {
                     Image(systemName: "arrow.clockwise")
                 }.help("Refresh")
                 Button { showingRun = true } label: {
@@ -74,6 +82,7 @@ struct ContainerRow: View {
     @EnvironmentObject var store: Store
     let container: ContainerInfo
     let selected: Bool
+    let namespace: Namespace.ID
     let onSelect: () -> Void
     let onLogs: () -> Void
 
@@ -83,6 +92,7 @@ struct ContainerRow: View {
                 .font(.title2)
                 .foregroundStyle(container.runState.color.gradient)
                 .frame(width: 30)
+                .animation(.smooth, value: container.runState)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
@@ -105,19 +115,20 @@ struct ContainerRow: View {
 
             actions
         }
-        .padding(10)
-        .background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(selected ? Color.accentColor.opacity(0.16) : Theme.cardBG.opacity(0.5))
-        }
+        .padding(12)
+        .glassEffect(
+            selected ? .regular.tint(.accentColor.opacity(0.5)).interactive() : .regular,
+            in: .rect(cornerRadius: 14))
+        .glassEffectID(container.id, in: namespace)
         .overlay(alignment: .leading) {
             if selected {
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.accentColor).frame(width: 3).padding(.vertical, 8)
+                    .fill(Color.accentColor).frame(width: 3).padding(.vertical, 10)
+                    .transition(.opacity)
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture(perform: onSelect)
+        .onTapGesture { withAnimation(.snappy) { onSelect() } }
         .contextMenu { menuButtons }
     }
 
@@ -168,6 +179,8 @@ struct ContainerDetail: View {
     let onLogs: () -> Void
     @State private var execCommand = ""
     @State private var execOutput = ""
+    @State private var aiOutput = ""
+    @State private var aiBusy = false
 
     var body: some View {
         ScrollView {
@@ -180,9 +193,14 @@ struct ContainerDetail: View {
                         Text(container.id).font(.title2.bold())
                         StatusPill(state: container.runState)
                     }
+                    Spacer()
                 }
+                .padding(14)
+                .background { AuroraBackground(tint: container.runState.color).opacity(0.5) }
+                .glassEffect(.regular, in: .rect(cornerRadius: 16))
 
                 actionButtons
+                if store.aiAvailable { assistantSection }
 
                 Divider()
 
@@ -220,19 +238,56 @@ struct ContainerDetail: View {
             if container.runState.isRunning {
                 Button { store.stopContainer(container.id) } label: {
                     Label("Stop", systemImage: "stop.fill")
-                }
+                }.buttonStyle(.glassProminent).tint(.orange)
                 Button { store.openShell(container.id) } label: {
                     Label("Shell", systemImage: "terminal")
-                }.help("Open an interactive shell in Terminal.app")
+                }.buttonStyle(.glass).help("Open an interactive shell in Terminal.app")
             } else {
                 Button { store.startContainer(container.id) } label: {
                     Label("Start", systemImage: "play.fill")
-                }
+                }.buttonStyle(.glassProminent).tint(.green)
             }
             Button { onLogs() } label: { Label("Logs", systemImage: "text.alignleft") }
+                .buttonStyle(.glass)
         }
-        .buttonStyle(.bordered)
         .controlSize(.small)
+    }
+
+    /// On-device Foundation Models: explain the container, diagnose its logs.
+    private var assistantSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.tint)
+                    .symbolEffect(.pulse, isActive: aiBusy)
+                Text("Assistant").font(.caption.bold()).foregroundStyle(.secondary)
+                Spacer()
+            }
+            HStack {
+                Button("Explain") { runAI { store.explain(container, then: $0) } }
+                if container.runState.isRunning {
+                    Button("Diagnose logs") { runAI { store.diagnose(container.id, then: $0) } }
+                }
+            }
+            .buttonStyle(.glass).controlSize(.small).disabled(aiBusy)
+
+            if !aiOutput.isEmpty {
+                Text(aiOutput)
+                    .font(.callout)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .glassEffect(.regular, in: .rect(cornerRadius: 10))
+                    .transition(.opacity)
+            }
+        }
+        .animation(.smooth, value: aiOutput)
+    }
+
+    private func runAI(_ op: (@escaping (String) -> Void) -> Void) {
+        aiBusy = true
+        aiOutput = "Thinking…"
+        op { text in aiOutput = text; aiBusy = false }
     }
 
     private var execSection: some View {
@@ -300,7 +355,8 @@ struct EngineStopped: View {
         } actions: {
             Button { store.toggleSystem() } label: {
                 Label("Start engine", systemImage: "play.fill")
-            }.buttonStyle(.borderedProminent)
+            }.buttonStyle(.glassProminent).tint(.green)
         }
+        .background { AuroraBackground(tint: .secondary).opacity(0.35).ignoresSafeArea() }
     }
 }

@@ -53,9 +53,19 @@ enum SidebarSection: String, CaseIterable, Identifiable {
 
 struct RootView: View {
     @EnvironmentObject var store: Store
+    @Environment(\.scenePhase) private var scenePhase
     @State private var section: SidebarSection = .containers
 
     var body: some View {
+        content
+            .onChange(of: scenePhase) { _, phase in
+                // Pause polling while the app is backgrounded; refresh on return.
+                store.active = (phase == .active)
+                if phase == .active { Task { await store.refresh(includeImages: true) } }
+            }
+    }
+
+    private var content: some View {
         NavigationSplitView {
             List(selection: $section) {
                 ForEach(SidebarSection.allCases) { s in

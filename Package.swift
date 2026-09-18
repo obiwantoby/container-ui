@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "container-ui",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("26.0")],   // Liquid Glass (glassEffect, GlassEffectContainer)
     products: [
         .executable(name: "ContainerUI", targets: ["ContainerUI"]),
         .executable(name: "ctui", targets: ["ctui"]),

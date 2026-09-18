@@ -14,6 +14,9 @@ struct RunSheet: View {
     @State private var volumesText = ""     // one "host:container[:ro]" per line
     @State private var portsText = ""       // one "host:container" per line
     @State private var envText = ""         // one "KEY=VALUE" per line
+    @State private var aiPrompt = ""
+    @State private var aiFlags = ""
+    @State private var aiBusy = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,6 +26,8 @@ struct RunSheet: View {
                 Spacer()
             }.padding()
             Divider()
+
+            if store.aiAvailable { assistant }
 
             Form {
                 Section("Image") {
@@ -65,6 +70,49 @@ struct RunSheet: View {
             }.padding()
         }
         .frame(width: 520, height: 640)
+    }
+
+    /// Natural-language → `container run` flags, on-device.
+    private var assistant: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles").foregroundStyle(.tint)
+                    .symbolEffect(.pulse, isActive: aiBusy)
+                TextField("Describe it, e.g. “nginx on port 8080 with 512MB”", text: $aiPrompt)
+                    .textFieldStyle(.plain)
+                    .onSubmit(suggest)
+                Button("Suggest", action: suggest)
+                    .buttonStyle(.glass).controlSize(.small)
+                    .disabled(aiPrompt.isEmpty || aiBusy)
+            }
+            if !aiFlags.isEmpty {
+                HStack {
+                    Text("container run \(aiFlags)")
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled).lineLimit(2)
+                    Spacer()
+                    Button("Run it") {
+                        store.runRaw(flags: aiFlags.split(separator: " ").map(String.init))
+                        dismiss()
+                    }.buttonStyle(.glassProminent).controlSize(.small)
+                }
+                .padding(8)
+                .glassEffect(.regular, in: .rect(cornerRadius: 8))
+                .transition(.opacity)
+            }
+        }
+        .padding(12)
+        .animation(.smooth, value: aiFlags)
+    }
+
+    private func suggest() {
+        guard !aiPrompt.isEmpty else { return }
+        aiBusy = true; aiFlags = ""
+        store.suggestRun(aiPrompt) { flags in
+            // Keep a single clean line of flags.
+            aiFlags = flags.split(whereSeparator: \.isNewline).first.map(String.init) ?? flags
+            aiBusy = false
+        }
     }
 
     private var spec: RunSpec {
