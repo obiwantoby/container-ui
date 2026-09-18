@@ -83,5 +83,24 @@ final class Store: ObservableObject {
     }
     func run(_ spec: RunSpec) { perform("Run") { _ = try await self.cli.runContainer(spec) } }
 
+    /// Run a one-shot command in a container; returns output via completion.
+    func exec(_ id: String, command: String, then completion: @escaping (String) -> Void) {
+        Task {
+            do { completion(try await cli.exec(id, command: command)) }
+            catch { completion("Error: \(error.localizedDescription)") }
+        }
+    }
+
+    /// Open an interactive shell in Terminal.app (the interactive session the
+    /// GUI itself can't host).
+    func openShell(_ id: String, shell: String = "bash") {
+        let cmd = cli.interactiveShellCommand(id, shell: shell)
+        let script = "tell application \"Terminal\"\nactivate\ndo script \"\(cmd)\"\nend tell"
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        p.arguments = ["-e", script]
+        try? p.run()
+    }
+
     func dismissError() { lastError = nil }
 }

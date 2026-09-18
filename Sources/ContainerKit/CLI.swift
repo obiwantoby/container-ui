@@ -132,6 +132,19 @@ public actor ContainerCLI {
         try await runChecked(spec.arguments)
     }
 
+    /// Run a one-shot command inside a running container and return its output.
+    public func exec(_ id: String, command: String) async throws -> String {
+        var argv = ["exec", id]
+        argv += command.split(separator: " ").map(String.init)
+        let r = try await run(argv)
+        return r.stdout + (r.stderr.isEmpty ? "" : r.stderr)
+    }
+
+    /// Command a user can run in a real terminal to get an interactive shell.
+    public nonisolated func interactiveShellCommand(_ id: String, shell: String = "bash") -> String {
+        "\(binaryPath) exec -it \(id) \(shell)"
+    }
+
     // MARK: Streaming logs
 
     /// Stream a container's logs. Returns the async line stream and a handle to
