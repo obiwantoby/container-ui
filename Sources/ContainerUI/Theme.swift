@@ -19,26 +19,19 @@ extension RunState {
     }
 }
 
-/// A small colored dot + label used throughout the UI. The dot pulses while
-/// the container is running (SF Symbol-style life via a scaling animation).
+/// A small colored dot + label used throughout the UI. Calm and static.
 struct StatusPill: View {
     let state: RunState
-    @State private var pulse = false
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             Circle()
                 .fill(state.color)
-                .frame(width: 8, height: 8)
-                .shadow(color: state.color.opacity(state.isRunning ? 0.9 : 0), radius: pulse ? 6 : 2)
-                .scaleEffect(state.isRunning && pulse ? 1.25 : 1.0)
-                .animation(state.isRunning
-                           ? .easeInOut(duration: 1.1).repeatForever(autoreverses: true)
-                           : .default, value: pulse)
-                .onAppear { pulse = true }
+                .frame(width: 7, height: 7)
             Text(state.label)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.secondary)
         }
+        .fixedSize()
     }
 }
 

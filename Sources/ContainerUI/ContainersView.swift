@@ -123,15 +123,15 @@ struct ContainerRow: View {
 
             actions
         }
-        .padding(12)
+        .padding(.vertical, 12).padding(.horizontal, 14)
         .glassEffect(
-            selected ? .regular.tint(.accentColor.opacity(0.5)).interactive() : .regular,
+            selected ? .regular.tint(.accentColor.opacity(0.14)) : .regular,
             in: .rect(cornerRadius: 14))
         .glassEffectID(container.id, in: namespace)
-        .overlay(alignment: .leading) {
+        .overlay {
             if selected {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.accentColor).frame(width: 3).padding(.vertical, 10)
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Color.accentColor.opacity(0.55), lineWidth: 1.5)
                     .transition(.opacity)
             }
         }
@@ -205,8 +205,9 @@ struct ContainerDetail: View {
                     Spacer()
                 }
                 .padding(14)
-                .background { AuroraBackground(tint: container.runState.color).opacity(0.5) }
-                .glassEffect(.regular, in: .rect(cornerRadius: 16))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .glassEffect(.regular.tint(container.runState.color.opacity(0.12)),
+                             in: .rect(cornerRadius: 16))
 
                 actionButtons
                 if store.aiAvailable { assistantSection }
@@ -243,26 +244,36 @@ struct ContainerDetail: View {
     }
 
     private var actionButtons: some View {
-        HStack {
+        HStack(spacing: 8) {
             if container.runState.isRunning {
-                Button { store.stopContainer(container.id) } label: {
-                    Label("Stop", systemImage: "stop.fill")
-                }.buttonStyle(.glassProminent).tint(.orange)
-                Button { store.openShell(container.id) } label: {
-                    Label("Shell", systemImage: "terminal")
-                }.buttonStyle(.glass).help("Open an interactive shell in Terminal.app")
+                iconAction("stop.fill", "Stop", prominent: true, tint: .orange) {
+                    store.stopContainer(container.id)
+                }
+                iconAction("terminal", "Open shell in Terminal") { store.openShell(container.id) }
             } else {
-                Button { store.startContainer(container.id) } label: {
-                    Label("Start", systemImage: "play.fill")
-                }.buttonStyle(.glassProminent).tint(.green)
+                iconAction("play.fill", "Start", prominent: true, tint: .green) {
+                    store.startContainer(container.id)
+                }
             }
-            Button { onLogs() } label: { Label("Logs", systemImage: "text.alignleft") }
-                .buttonStyle(.glass)
-            Button { onEdit() } label: { Label("Edit", systemImage: "pencil") }
-                .buttonStyle(.glass)
-                .help("Recreate this container with new mounts, ports, or resources")
+            iconAction("text.alignleft", "Logs") { onLogs() }
+            iconAction("pencil", "Edit — recreate with new mounts/ports/resources") { onEdit() }
+            Spacer()
         }
-        .controlSize(.small)
+        .controlSize(.large)
+    }
+
+    @ViewBuilder
+    private func iconAction(_ symbol: String, _ help: String,
+                            prominent: Bool = false, tint: Color = .accentColor,
+                            action: @escaping () -> Void) -> some View {
+        let label = Image(systemName: symbol).frame(width: 20, height: 18)
+        if prominent {
+            Button(action: action) { label }
+                .buttonStyle(.glassProminent).tint(tint).help(help)
+        } else {
+            Button(action: action) { label }
+                .buttonStyle(.glass).help(help)
+        }
     }
 
     /// On-device Foundation Models: explain the container, diagnose its logs.
