@@ -78,14 +78,20 @@ struct RunSheet: View {
         .onAppear(perform: prefill)
     }
 
-    /// Seed the form from the container being edited (once).
+    /// Seed the form from the container being edited (once), preserving its
+    /// existing mounts, ports, env, and command so a recreate keeps them.
     private func prefill() {
         guard let c = editing, !didPrefill else { return }
         didPrefill = true
         image = c.image
         name = c.id
-        memory = ""   // keep default unless the user sets it; shown as placeholder
         cpus = "\(c.cpus)"
+        memory = "\(c.memoryBytes / (1024 * 1024))M"
+        command = c.commandSpec
+        volumesText = c.mountSpecs.joined(separator: "\n")
+        portsText = c.portMappings.map { $0.replacingOccurrences(of: "→", with: ":") }
+                                   .joined(separator: "\n")
+        envText = c.envSpecs.joined(separator: "\n")
         detach = true
     }
 

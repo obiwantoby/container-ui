@@ -15,6 +15,8 @@ public struct ContainerInfo: Codable, Identifiable, Hashable, Sendable {
         public let image: Image
         public let resources: Resources
         public let publishedPorts: [PublishedPort]?   // optional: absent/empty is common
+        public let mounts: [Mount]?
+        public let initProcess: InitProcess?
 
         public struct Image: Codable, Hashable, Sendable {
             public let reference: String
@@ -22,6 +24,16 @@ public struct ContainerInfo: Codable, Identifiable, Hashable, Sendable {
         public struct Resources: Codable, Hashable, Sendable {
             public let cpus: Int
             public let memoryInBytes: Int64
+        }
+        public struct Mount: Codable, Hashable, Sendable {
+            public let source: String?
+            public let destination: String?
+            public let options: [String]?
+        }
+        public struct InitProcess: Codable, Hashable, Sendable {
+            public let executable: String?
+            public let arguments: [String]?
+            public let environment: [String]?
         }
     }
 
@@ -59,6 +71,27 @@ public struct ContainerInfo: Codable, Identifiable, Hashable, Sendable {
             let proto = p.proto.map { "/\($0)" } ?? ""
             return "\(h)→\(c)\(proto)"
         }
+    }
+
+    /// "-v"-style mount specs: "source:destination[:ro]".
+    public var mountSpecs: [String] {
+        (configuration.mounts ?? []).compactMap { m in
+            guard let s = m.source, let d = m.destination, !s.isEmpty, !d.isEmpty else { return nil }
+            let ro = (m.options ?? []).contains { $0.lowercased() == "ro" || $0.lowercased() == "readonly" }
+            return "\(s):\(d)" + (ro ? ":ro" : "")
+        }
+    }
+
+    /// User environment ("KEY=VALUE"), minus the default PATH the runtime adds.
+    public var envSpecs: [String] {
+        (configuration.initProcess?.environment ?? []).filter { !$0.hasPrefix("PATH=") }
+    }
+
+    /// The container's entrypoint command, if any (executable + arguments).
+    public var commandSpec: String {
+        guard let p = configuration.initProcess else { return "" }
+        let parts = [p.executable].compactMap { $0 } + (p.arguments ?? [])
+        return parts.joined(separator: " ")
     }
 
     public var runState: RunState { RunState(raw: status.state) }

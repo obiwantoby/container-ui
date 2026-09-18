@@ -18,20 +18,13 @@ struct ImagesView: View {
                 ContentUnavailableView("No images", systemImage: "square.stack.3d.up",
                     description: Text("Pull one by running a container from it."))
             } else {
-                Table(filtered) {
-                    TableColumn("Name") { img in
-                        HStack {
-                            Image(systemName: "square.stack.3d.up.fill")
-                                .foregroundStyle(.tint)
-                            Text(img.shortName).fontWeight(.medium)
+                ScrollView {
+                    GlassEffectContainer(spacing: 8) {
+                        LazyVStack(spacing: 8) {
+                            ForEach(filtered) { img in ImageRow(image: img) }
                         }
                     }
-                    TableColumn("Repository") { Text($0.name).foregroundStyle(.secondary) }
-                    TableColumn("Digest") {
-                        Text($0.shortDigest).font(.system(.body, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                    TableColumn("Size") { Text(Format.bytes($0.size)).monospacedDigit() }
+                    .padding(12)
                 }
             }
         }
@@ -41,6 +34,30 @@ struct ImagesView: View {
             Button { Task { await store.refresh() } } label: {
                 Image(systemName: "arrow.clockwise")
             }.help("Refresh")
+        }
+    }
+}
+
+struct ImageRow: View {
+    let image: ImageInfo
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "square.stack.3d.up.fill")
+                .font(.title2).foregroundStyle(Color.accentColor.gradient).frame(width: 30)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(image.shortName).font(.headline)
+                Text(image.name).font(.subheadline).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            Spacer()
+            MetricChip(icon: "number", value: image.shortDigest)
+            MetricChip(icon: "internaldrive", value: Format.bytes(image.size))
+        }
+        .padding(.vertical, 12).padding(.horizontal, 14)
+        .glassEffect(.regular, in: .rect(cornerRadius: 14))
+        .contextMenu {
+            Button("Copy name") { copy(image.name) }
+            Button("Copy digest") { copy(image.digest) }
         }
     }
 }
